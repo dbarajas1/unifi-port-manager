@@ -374,23 +374,55 @@ if ($Action -eq 'Disable') {
     $otherOverrides = [array]@($currentOverrides | Where-Object { $_.port_idx -ne $PortNumber })
     $newOverrides   = if ($otherOverrides) { $otherOverrides + $newOverride } else { @($newOverride) }
 
+    $putBody     = @{ port_overrides = $newOverrides }
+    $putBodyJson = $putBody | ConvertTo-Json -Depth 20 -Compress
+    Write-Verbose "PUT body: $putBodyJson"
+
     if ($PSCmdlet.ShouldProcess("Port $PortNumber on $($switch.name) [$($switch.mac)]", 'Disable port')) {
         $result = Invoke-UniFiApi `
             -Uri     "$ControllerUrl/proxy/network/api/s/$Site/rest/device/$deviceId" `
             -Method  'PUT' `
             -CsrfToken $csrf `
             -WebSession $webSession `
-            -Body    @{ port_overrides = $newOverrides }
+            -Body    $putBody
 
-        if ($result.meta.rc -eq 'ok') {
-            Write-Host "[+] Port $PortNumber DISABLED on $($switch.name)."
+        Write-Verbose "PUT response: $($result | ConvertTo-Json -Depth 5 -Compress)"
+
+        if ($result.meta.rc -ne 'ok') {
+            Write-Error "API returned non-ok status: $($result.meta | ConvertTo-Json -Depth 3)"
+            exit 1
+        }
+
+        # Verify the change actually landed — re-fetch and inspect port_overrides
+        Write-Host "[*] Verifying change on controller ..."
+        Start-Sleep -Milliseconds 800
+        $verify     = Invoke-UniFiApi -Uri "$ControllerUrl/proxy/network/api/s/$Site/stat/device/$deviceId" `
+                                       -CsrfToken $csrf -WebSession $webSession
+        $verifyDev  = $verify.data | Select-Object -First 1
+        $verifyPort = @(if ($verifyDev.port_overrides) { $verifyDev.port_overrides } else { @() }) |
+                      Where-Object { $_.port_idx -eq $PortNumber } | Select-Object -First 1
+
+        if ($verifyPort -and $verifyPort.PSObject.Properties['disabled'] -and $verifyPort.disabled -eq $true) {
+            Write-Host "[+] VERIFIED: Port $PortNumber is disabled on $($switch.name)."
             Write-Host "    Run with -Action Enable -PortNumber $PortNumber to restore."
         } else {
-            Write-Error "API returned non-ok status: $($result.meta | ConvertTo-Json -Depth 3)"
+            Write-Warning "API accepted the request (rc=ok) but port $PortNumber does NOT show disabled=true after re-fetch."
+            Write-Host ""
+            Write-Host "  Actual port_override on controller after PUT:"
+            if ($verifyPort) { $verifyPort | Format-List } else { Write-Host "  (no override entry for port $PortNumber)" }
+            Write-Host ""
+            Write-Host "  Possible causes:"
+            Write-Host "  1. Account '$Username' may lack write permission on device config."
+            Write-Host "  2. The 'disabled' field may not be supported for this device/firmware."
+            Write-Host "  3. The controller accepted the PUT but silently dropped the 'disabled' key."
+            Write-Host ""
+            Write-Host "  Run with -Verbose to see the exact JSON sent and the full API response."
+            # Remove stale snapshot since the disable did not actually apply
+            Remove-Item $stateFile -ErrorAction SilentlyContinue
+            exit 1
         }
     } else {
-        Write-Host "[WhatIf] Would set port_overrides entry for port $PortNumber to: disabled=true"
-        Write-Host "[WhatIf] (snapshot would be written to $stateFile)"
+        Write-Host "[WhatIf] Would PUT: $putBodyJson"
     }
 }
 
