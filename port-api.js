@@ -268,6 +268,47 @@ async function enablePort(portNum) {
   }
 }
 
+// ── Bulk status (all ports on the switch) ─────────────────────────────────────
+async function allPortsStatus() {
+  const { token, csrf } = await login();
+  try {
+    const devices = await getDevices(csrf, token);
+    const sw      = devices.find(d => d.type === 'usw' && d.name === deviceName);
+    if (!sw) throw new Error(`Switch '${deviceName}' not found`);
+
+    const overrides = sw.port_overrides || [];
+    const portTable = (sw.port_table || []).sort((a, b) => a.port_idx - b.port_idx);
+
+    const ports = portTable.map(pt => {
+      const n        = pt.port_idx;
+      const override = overrides.find(o => o.port_idx === n) || null;
+      const sf       = stateFile(n);
+      const snapshot = fs.existsSync(sf) ? JSON.parse(fs.readFileSync(sf, 'utf8')) : null;
+      return {
+        port:               n,
+        name:               override?.name || pt.name || `Port ${n}`,
+        disabled:           !!(override && override.forward === 'disabled'),
+        link:               pt.up ? 'up' : 'down',
+        speed:              pt.speed || 0,
+        poe_mode:           pt.poe_mode || null,
+        snapshotPresent:    !!snapshot,
+        snapshotCapturedAt: snapshot ? snapshot.captured_at : null,
+      };
+    });
+
+    return {
+      device:    sw.name,
+      model:     sw.model,
+      mac:       sw.mac,
+      ip:        sw.ip,
+      ports,
+      timestamp: new Date().toISOString(),
+    };
+  } finally {
+    await logout(csrf, token);
+  }
+}
+
 // ── HTTP server ───────────────────────────────────────────────────────────────
 function send(res, status, body) {
   const json = JSON.stringify(body, null, 2);
@@ -286,11 +327,26 @@ const server = http.createServer(async (req, res) => {
     return send(res, 401, { error: 'Unauthorized — supply X-API-Token header' });
   }
 
+  // Bulk: all ports in one call
+  if (req.method === 'GET' && url.pathname === '/ports') {
+    try { return send(res, 200, await allPortsStatus()); }
+    catch (err) {
+      console.error('[ERROR] GET /ports —', err.message);
+      return send(res, 500, { error: err.message });
+    }
+  }
+
   const m = url.pathname.match(/^\/ports\/(\d+)(?:\/(disable|enable))?$/);
   if (!m) {
     return send(res, 404, {
       error: 'Not found',
-      routes: ['GET /health', 'GET /ports/:n', 'POST /ports/:n/disable', 'POST /ports/:n/enable'],
+      routes: [
+        'GET  /health',
+        'GET  /ports              — all ports',
+        'GET  /ports/:n           — single port',
+        'POST /ports/:n/disable',
+        'POST /ports/:n/enable',
+      ],
     });
   }
 
@@ -320,6 +376,7 @@ server.listen(listenPort, listenAddress, () => {
   console.log('');
   console.log('Endpoints (X-API-Token header required except /health):');
   console.log(`  GET  http://${listenAddress}:${listenPort}/health`);
+  console.log(`  GET  http://${listenAddress}:${listenPort}/ports           ← all ports`);
   console.log(`  GET  http://${listenAddress}:${listenPort}/ports/:n`);
   console.log(`  POST http://${listenAddress}:${listenPort}/ports/:n/disable`);
   console.log(`  POST http://${listenAddress}:${listenPort}/ports/:n/enable`);

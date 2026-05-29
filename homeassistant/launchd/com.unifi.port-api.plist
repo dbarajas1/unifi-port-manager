@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS launchd agent — keeps port-api.js running in the background.
+
+  Install:
+    1. Edit the two paths below (search for YOUR_HOME_PATH).
+    2. cp com.unifi.port-api.plist ~/Library/LaunchAgents/
+    3. launchctl load ~/Library/LaunchAgents/com.unifi.port-api.plist
+
+  Check status:  launchctl list | grep unifi
+  View logs:     tail -f /tmp/unifi-port-api.log
+  Stop:          launchctl unload ~/Library/LaunchAgents/com.unifi.port-api.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.unifi.port-api</string>
+
+    <!-- Login shell so PATH includes Homebrew node and the Keychain is accessible -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-lc</string>
+        <string>cd YOUR_HOME_PATH/dev/ubnt &amp;&amp; exec node port-api.js</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart automatically if the process crashes -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Throttle rapid restart loops -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/unifi-port-api.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/unifi-port-api.log</string>
+</dict>
+</plist>

@@ -1,0 +1,269 @@
+# UniFi switch port control — Home Assistant package
+#
+# Prerequisites:
+#   1. port-api.js is running on the host that has access to the controller.
+#   2. unifi_api_token is set in your secrets.yaml  (see secrets.yaml.example).
+#   3. This file is included via packages in configuration.yaml (see README).
+#
+# What this creates:
+#   sensor.unifi_switch_ports     — bulk poll, all port data as attributes
+#   sensor.unifi_port_N_link      — link state per port (up / down / unknown)
+#   switch.unifi_port_N           — toggle switch per port (on = enabled, off = disabled)
+#
+# Ports 1-8 are 10G copper; ports 9-10 are SFP28 uplinks on the USW Pro XG 8 PoE.
+# Remove or comment out ports you don't need to control.
+#
+# After adding this package, go to Developer Tools → Template to preview
+# state_attr('sensor.unifi_switch_ports', 'ports') and confirm port data arrives.
+
+# ── REST command: single endpoint drives enable and disable via data variables ─
+rest_command:
+  unifi_port_action:
+    url: "http://localhost:8765/ports/{{ port_number }}/{{ action }}"
+    method: POST
+    headers:
+      X-API-Token: !secret unifi_api_token
+    content_type: "application/json"
+
+# ── REST sensor: bulk poll — all ports in one request ─────────────────────────
+rest:
+  - resource: "http://localhost:8765/ports"
+    scan_interval: 60
+    headers:
+      X-API-Token: !secret unifi_api_token
+    sensor:
+      - name: "UniFi Switch Ports"
+        unique_id: unifi_switch_ports_bulk
+        value_template: "{{ value_json.device | default('unavailable') }}"
+        json_attributes:
+          - ports
+          - device
+          - model
+          - ip
+          - timestamp
+
+# ── Template entities: one sensor + one switch per port ───────────────────────
+template:
+  - sensor:
+      - name: "UniFi Port 1 Link"
+        unique_id: unifi_port_1_link
+        availability: "{{ not is_state('sensor.unifi_switch_ports', 'unavailable') }}"
+        state: >
+          {% set p = state_attr('sensor.unifi_switch_ports', 'ports') | default([]) | selectattr('port', 'equalto', 1) | list %}
+          {{ p[0].link if p | length > 0 else 'unknown' }}
+        icon: "mdi:ethernet"
+
+      - name: "UniFi Port 2 Link"
+        unique_id: unifi_port_2_link
+        availability: "{{ not is_state('sensor.unifi_switch_ports', 'unavailable') }}"
+        state: >
+          {% set p = state_attr('sensor.unifi_switch_ports', 'ports') | default([]) | selectattr('port', 'equalto', 2) | list %}
+          {{ p[0].link if p | length > 0 else 'unknown' }}
+        icon: "mdi:ethernet"
+
+      - name: "UniFi Port 3 Link"
+        unique_id: unifi_port_3_link
+        availability: "{{ not is_state('sensor.unifi_switch_ports', 'unavailable') }}"
+        state: >
+          {% set p = state_attr('sensor.unifi_switch_ports', 'ports') | default([]) | selectattr('port', 'equalto', 3) | list %}
+          {{ p[0].link if p | length > 0 else 'unknown' }}
+        icon: "mdi:ethernet"
+
+      - name: "UniFi Port 4 Link"
+        unique_id: unifi_port_4_link
+        availability: "{{ not is_state('sensor.unifi_switch_ports', 'unavailable') }}"
+        state: >
+          {% set p = state_attr('sensor.unifi_switch_ports', 'ports') | default([]) | selectattr('port', 'equalto', 4) | list %}
+          {{ p[0].link if p | length > 0 else 'unknown' }}
+        icon: "mdi:ethernet"
+
+      - name: "UniFi Port 5 Link"
+        unique_id: unifi_port_5_link
+        availability: "{{ not is_state('sensor.unifi_switch_ports', 'unavailable') }}"
+        state: >
+          {% set p = state_attr('sensor.unifi_switch_ports', 'ports') | default([]) | selectattr('port', 'equalto', 5) | list %}
+          {{ p[0].link if p | length > 0 else 'unknown' }}
+        icon: "mdi:ethernet"
+
+      - name: "UniFi Port 6 Link"
+        unique_id: unifi_port_6_link
+        availability: "{{ not is_state('sensor.unifi_switch_ports', 'unavailable') }}"
+        state: >
+          {% set p = state_attr('sensor.unifi_switch_ports', 'ports') | default([]) | selectattr('port', 'equalto', 6) | list %}
+          {{ p[0].link if p | length > 0 else 'unknown' }}
+        icon: "mdi:ethernet"
+
+      - name: "UniFi Port 7 Link"
+        unique_id: unifi_port_7_link
+        availability: "{{ not is_state('sensor.unifi_switch_ports', 'unavailable') }}"
+        state: >
+          {% set p = state_attr('sensor.unifi_switch_ports', 'ports') | default([]) | selectattr('port', 'equalto', 7) | list %}
+          {{ p[0].link if p | length > 0 else 'unknown' }}
+        icon: "mdi:ethernet"
+
+      - name: "UniFi Port 8 Link"
+        unique_id: unifi_port_8_link
+        availability: "{{ not is_state('sensor.unifi_switch_ports', 'unavailable') }}"
+        state: >
+          {% set p = state_attr('sensor.unifi_switch_ports', 'ports') | default([]) | selectattr('port', 'equalto', 8) | list %}
+          {{ p[0].link if p | length > 0 else 'unknown' }}
+        icon: "mdi:ethernet"
+
+      # SFP28 uplink ports
+      - name: "UniFi Port 9 Link"
+        unique_id: unifi_port_9_link
+        availability: "{{ not is_state('sensor.unifi_switch_ports', 'unavailable') }}"
+        state: >
+          {% set p = state_attr('sensor.unifi_switch_ports', 'ports') | default([]) | selectattr('port', 'equalto', 9) | list %}
+          {{ p[0].link if p | length > 0 else 'unknown' }}
+        icon: "mdi:cable-data"
+
+      - name: "UniFi Port 10 Link"
+        unique_id: unifi_port_10_link
+        availability: "{{ not is_state('sensor.unifi_switch_ports', 'unavailable') }}"
+        state: >
+          {% set p = state_attr('sensor.unifi_switch_ports', 'ports') | default([]) | selectattr('port', 'equalto', 10) | list %}
+          {{ p[0].link if p | length > 0 else 'unknown' }}
+        icon: "mdi:cable-data"
+
+  - switch:
+      - name: "UniFi Port 1"
+        unique_id: unifi_port_1_switch
+        availability: "{{ not is_state('sensor.unifi_switch_ports', 'unavailable') }}"
+        state: >
+          {% set p = state_attr('sensor.unifi_switch_ports', 'ports') | default([]) | selectattr('port', 'equalto', 1) | list %}
+          {{ not p[0].disabled if p | length > 0 else false }}
+        turn_on:
+          service: rest_command.unifi_port_action
+          data: { port_number: "1", action: "enable" }
+        turn_off:
+          service: rest_command.unifi_port_action
+          data: { port_number: "1", action: "disable" }
+        icon: "mdi:ethernet"
+
+      - name: "UniFi Port 2"
+        unique_id: unifi_port_2_switch
+        availability: "{{ not is_state('sensor.unifi_switch_ports', 'unavailable') }}"
+        state: >
+          {% set p = state_attr('sensor.unifi_switch_ports', 'ports') | default([]) | selectattr('port', 'equalto', 2) | list %}
+          {{ not p[0].disabled if p | length > 0 else false }}
+        turn_on:
+          service: rest_command.unifi_port_action
+          data: { port_number: "2", action: "enable" }
+        turn_off:
+          service: rest_command.unifi_port_action
+          data: { port_number: "2", action: "disable" }
+        icon: "mdi:ethernet"
+
+      - name: "UniFi Port 3"
+        unique_id: unifi_port_3_switch
+        availability: "{{ not is_state('sensor.unifi_switch_ports', 'unavailable') }}"
+        state: >
+          {% set p = state_attr('sensor.unifi_switch_ports', 'ports') | default([]) | selectattr('port', 'equalto', 3) | list %}
+          {{ not p[0].disabled if p | length > 0 else false }}
+        turn_on:
+          service: rest_command.unifi_port_action
+          data: { port_number: "3", action: "enable" }
+        turn_off:
+          service: rest_command.unifi_port_action
+          data: { port_number: "3", action: "disable" }
+        icon: "mdi:ethernet"
+
+      - name: "UniFi Port 4"
+        unique_id: unifi_port_4_switch
+        availability: "{{ not is_state('sensor.unifi_switch_ports', 'unavailable') }}"
+        state: >
+          {% set p = state_attr('sensor.unifi_switch_ports', 'ports') | default([]) | selectattr('port', 'equalto', 4) | list %}
+          {{ not p[0].disabled if p | length > 0 else false }}
+        turn_on:
+          service: rest_command.unifi_port_action
+          data: { port_number: "4", action: "enable" }
+        turn_off:
+          service: rest_command.unifi_port_action
+          data: { port_number: "4", action: "disable" }
+        icon: "mdi:ethernet"
+
+      - name: "UniFi Port 5"
+        unique_id: unifi_port_5_switch
+        availability: "{{ not is_state('sensor.unifi_switch_ports', 'unavailable') }}"
+        state: >
+          {% set p = state_attr('sensor.unifi_switch_ports', 'ports') | default([]) | selectattr('port', 'equalto', 5) | list %}
+          {{ not p[0].disabled if p | length > 0 else false }}
+        turn_on:
+          service: rest_command.unifi_port_action
+          data: { port_number: "5", action: "enable" }
+        turn_off:
+          service: rest_command.unifi_port_action
+          data: { port_number: "5", action: "disable" }
+        icon: "mdi:ethernet"
+
+      - name: "UniFi Port 6"
+        unique_id: unifi_port_6_switch
+        availability: "{{ not is_state('sensor.unifi_switch_ports', 'unavailable') }}"
+        state: >
+          {% set p = state_attr('sensor.unifi_switch_ports', 'ports') | default([]) | selectattr('port', 'equalto', 6) | list %}
+          {{ not p[0].disabled if p | length > 0 else false }}
+        turn_on:
+          service: rest_command.unifi_port_action
+          data: { port_number: "6", action: "enable" }
+        turn_off:
+          service: rest_command.unifi_port_action
+          data: { port_number: "6", action: "disable" }
+        icon: "mdi:ethernet"
+
+      - name: "UniFi Port 7"
+        unique_id: unifi_port_7_switch
+        availability: "{{ not is_state('sensor.unifi_switch_ports', 'unavailable') }}"
+        state: >
+          {% set p = state_attr('sensor.unifi_switch_ports', 'ports') | default([]) | selectattr('port', 'equalto', 7) | list %}
+          {{ not p[0].disabled if p | length > 0 else false }}
+        turn_on:
+          service: rest_command.unifi_port_action
+          data: { port_number: "7", action: "enable" }
+        turn_off:
+          service: rest_command.unifi_port_action
+          data: { port_number: "7", action: "disable" }
+        icon: "mdi:ethernet"
+
+      - name: "UniFi Port 8"
+        unique_id: unifi_port_8_switch
+        availability: "{{ not is_state('sensor.unifi_switch_ports', 'unavailable') }}"
+        state: >
+          {% set p = state_attr('sensor.unifi_switch_ports', 'ports') | default([]) | selectattr('port', 'equalto', 8) | list %}
+          {{ not p[0].disabled if p | length > 0 else false }}
+        turn_on:
+          service: rest_command.unifi_port_action
+          data: { port_number: "8", action: "enable" }
+        turn_off:
+          service: rest_command.unifi_port_action
+          data: { port_number: "8", action: "disable" }
+        icon: "mdi:ethernet"
+
+      # SFP28 uplink ports — disable with caution (uplinks carry all traffic)
+      - name: "UniFi Port 9 (SFP)"
+        unique_id: unifi_port_9_switch
+        availability: "{{ not is_state('sensor.unifi_switch_ports', 'unavailable') }}"
+        state: >
+          {% set p = state_attr('sensor.unifi_switch_ports', 'ports') | default([]) | selectattr('port', 'equalto', 9) | list %}
+          {{ not p[0].disabled if p | length > 0 else false }}
+        turn_on:
+          service: rest_command.unifi_port_action
+          data: { port_number: "9", action: "enable" }
+        turn_off:
+          service: rest_command.unifi_port_action
+          data: { port_number: "9", action: "disable" }
+        icon: "mdi:cable-data"
+
+      - name: "UniFi Port 10 (SFP)"
+        unique_id: unifi_port_10_switch
+        availability: "{{ not is_state('sensor.unifi_switch_ports', 'unavailable') }}"
+        state: >
+          {% set p = state_attr('sensor.unifi_switch_ports', 'ports') | default([]) | selectattr('port', 'equalto', 10) | list %}
+          {{ not p[0].disabled if p | length > 0 else false }}
+        turn_on:
+          service: rest_command.unifi_port_action
+          data: { port_number: "10", action: "enable" }
+        turn_off:
+          service: rest_command.unifi_port_action
+          data: { port_number: "10", action: "disable" }
+        icon: "mdi:cable-data"

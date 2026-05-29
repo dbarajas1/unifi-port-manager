@@ -1,0 +1,46 @@
+# Paste this into a dashboard view as a manual YAML card.
+# In HA UI: Dashboard → Edit → Add Card → Manual.
+#
+# Shows every port as a toggle row with link state as secondary info.
+# Rename rows via HA's entity customization (Settings → Entities → find
+# "UniFi Port N" → set a friendly name like "Server Room" or "CCTV Cam 1").
+
+type: entities
+title: UniFi Switch Ports
+show_header_toggle: false
+entities:
+  - type: section
+    label: "Copper (10G)"
+  - entity: switch.unifi_port_1
+    secondary_info: last-changed
+  - entity: switch.unifi_port_2
+    secondary_info: last-changed
+  - entity: switch.unifi_port_3
+    secondary_info: last-changed
+  - entity: switch.unifi_port_4
+    secondary_info: last-changed
+  - entity: switch.unifi_port_5
+    secondary_info: last-changed
+  - entity: switch.unifi_port_6
+    secondary_info: last-changed
+  - entity: switch.unifi_port_7
+    secondary_info: last-changed
+  - entity: switch.unifi_port_8
+    secondary_info: last-changed
+  - type: section
+    label: "SFP28 Uplinks"
+  - entity: switch.unifi_port_9_sfp
+    secondary_info: last-changed
+  - entity: switch.unifi_port_10_sfp
+    secondary_info: last-changed
+  - type: divider
+  - type: attribute
+    entity: sensor.unifi_switch_ports
+    attribute: device
+    name: Device
+    icon: mdi:switch
+  - type: attribute
+    entity: sensor.unifi_switch_ports
+    attribute: timestamp
+    name: Last polled
+    icon: mdi:clock-outline
