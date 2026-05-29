@@ -264,6 +264,8 @@ if (-not $DeviceMac -and -not $DeviceName) {
     exit 1
 }
 
+$switch = $null
+
 if ($DeviceMac) {
     $normMac = ($DeviceMac -replace '[:\-]', '').ToLower()
     $switch  = $switches | Where-Object { ($_.mac -replace ':', '').ToLower() -eq $normMac } |
