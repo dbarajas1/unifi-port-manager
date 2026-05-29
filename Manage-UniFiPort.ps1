@@ -75,7 +75,7 @@ param (
     [ValidateRange(1, 16)]
     [int]$PortNumber,
 
-    [string]$Username      = 'admin',
+    [string]$Username,
     [string]$Password,
     [string]$ControllerUrl = 'https://192.168.1.1',
     [string]$Site          = 'default',
@@ -148,10 +148,13 @@ function ConvertTo-Hashtable {
 $stateFile = Join-Path $StateDir "unifi_port${PortNumber}_state.json"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 1. Prompt for password if omitted
+# 1. Prompt for credentials if omitted
 # ══════════════════════════════════════════════════════════════════════════════
+if (-not $Username) {
+    $Username = Read-Host "Username"
+}
 if (-not $Password) {
-    $ss       = Read-Host "Enter password for '$Username' @ $ControllerUrl" -AsSecureString
+    $ss       = Read-Host "Password" -AsSecureString
     $Password = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
                     [Runtime.InteropServices.Marshal]::SecureStringToBSTR($ss))
 }
