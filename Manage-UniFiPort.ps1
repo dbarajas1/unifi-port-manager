@@ -151,12 +151,11 @@ $stateFile = Join-Path $StateDir "unifi_port${PortNumber}_state.json"
 # 1. Prompt for credentials if omitted
 # ══════════════════════════════════════════════════════════════════════════════
 if (-not $Username) {
-    $Username = Read-Host "Username"
+    $Username = (Read-Host "Username").Trim()
 }
 if (-not $Password) {
     $ss       = Read-Host "Password" -AsSecureString
-    $Password = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-                    [Runtime.InteropServices.Marshal]::SecureStringToBSTR($ss))
+    $Password = [System.Net.NetworkCredential]::new("", $ss).Password
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
