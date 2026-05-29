@@ -156,8 +156,11 @@ $stateFile = Join-Path $StateDir "unifi_port${PortNumber}_state.json"
 # 1. Prompt for credentials if omitted
 # ══════════════════════════════════════════════════════════════════════════════
 if (-not $Username -or -not $Password) {
-    $preUser  = if ($Username) { $Username } else { '' }
-    $cred     = Get-Credential -UserName $preUser -Message "Enter credentials for $ControllerUrl"
+    $cred = if ($Username) {
+        Get-Credential -UserName $Username -Message "Enter credentials for $ControllerUrl"
+    } else {
+        Get-Credential -Message "Enter credentials for $ControllerUrl"
+    }
     if (-not $cred) { Write-Error "No credentials provided."; exit 1 }
     $Username = $cred.UserName.Trim()
     $Password = $cred.GetNetworkCredential().Password
