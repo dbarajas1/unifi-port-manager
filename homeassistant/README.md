@@ -1,97 +1,140 @@
 # UniFi Port Manager — Home Assistant Integration
 
-Adds all switch ports as toggle entities in Home Assistant. Uses `port-api.js`
-as a bridge so HA never talks to the UniFi controller directly.
+Adds all switch ports as toggle entities in Home Assistant. `port-api.js`
+runs as a bridge so HA never talks to the UniFi controller directly.
 
 ```
-HA rest_command  →  port-api.js (localhost:8765)  →  UniFi controller
+HA rest_command  →  port-api.js (:8765)  →  UniFi controller
 ```
 
 ## What you get
 
 | Entity | Type | Description |
 |---|---|---|
-| `sensor.unifi_switch_ports` | Sensor | Bulk poll, all port data as JSON attributes |
-| `sensor.unifi_port_N_link` | Sensor | Link state per port (`up` / `down`) |
-| `switch.unifi_port_N` | Switch | Toggle to disable / enable each port |
+| `sensor.unifi_switch_ports` | Sensor | Bulk poll — switch port data as attributes |
+| `sensor.unifi_ucg_ports` | Sensor | Bulk poll — UCG Fiber port data as attributes |
+| `sensor.unifi_port_N_link` | Sensor | Link state per switch port (`up` / `down`) |
+| `sensor.unifi_fw_port_N_link` | Sensor | Link state per UCG Fiber port |
+| `switch.unifi_port_N` | Switch | Toggle — disable / enable switch port |
+| `switch.unifi_fw_port_N` | Switch | Toggle — disable / enable UCG Fiber port |
 
-Polling interval: 60 seconds (adjust `scan_interval` in `packages/unifi_ports.yaml`).
+Polling interval: 60 s (adjust `scan_interval` in `packages/unifi_ports.yaml`).
 
-## Prerequisites
+---
 
-1. `Setup-Config.ps1` has been run — `port-config.json` exists and the password is in the Keychain.
-2. `port-api.js` is running (see **Start as a background service** below).
-3. Home Assistant can reach `http://localhost:8765` — either it runs on the same Mac, or you expose the port via Tailscale or SSH tunnel.
+## Option A — Home Assistant OS (recommended)
 
-## Installation
+The `addon/` directory at the root of this repo is a proper HA Supervisor add-on.
+It runs `port-api.js` inside a Docker container managed by HA, with credentials
+entered through the normal HA add-on UI. Nothing to install on the Mac.
 
-### 1. Add the API token to HA secrets
+### 1. Add the repository to HA
 
-Open your HA `secrets.yaml` and add:
+Settings → Add-ons → Add-on store → ⋮ (top-right) → **Repositories** → paste:
 
-```yaml
-unifi_api_token: "paste-your-token-here"
+```
+https://github.com/dbarajas1/unifi-port-manager
 ```
 
-The token is in `port-config.json` (`apiToken` field) and was printed by `Setup-Config.ps1`.
+The **UniFi Port Manager** add-on will appear in the store.
 
-### 2. Enable packages in configuration.yaml
+### 2. Install and configure the add-on
 
-Add this block to your HA `configuration.yaml` (skip if you already use packages):
+- Click **Install**.
+- Go to the **Configuration** tab and fill in:
+
+| Field | Value |
+|---|---|
+| `controllerUrl` | `https://192.168.1.1` |
+| `site` | `default` |
+| `username` | `svc_automation` |
+| `password` | *(your controller password)* |
+| `deviceName` | `SJ-UP-SW-01` |
+| `ucgFiberName` | `SJ-FW-01` |
+| `apiPort` | `8765` |
+| `apiToken` | *(generate a long random string — see tip below)* |
+
+**Tip — generate a token** (run in any terminal):
+```bash
+node -e "console.log(require('crypto').randomBytes(36).toString('base64'))"
+# or
+openssl rand -base64 36
+```
+
+- Click **Save**, then **Start** the add-on.
+- Check the **Log** tab — you should see `UniFi Port Manager starting...`.
+
+### 3. Add the API token to HA secrets
+
+Open your HA `secrets.yaml` (in the HA config directory, e.g. via the File editor add-on):
+
+```yaml
+unifi_api_token: "paste-the-same-token-you-entered-above"
+```
+
+### 4. Install the HA config package
+
+Copy `packages/unifi_ports.yaml` into your HA config's `packages/` folder.
+If you don't have a packages folder yet, enable it in `configuration.yaml`:
 
 ```yaml
 homeassistant:
   packages: !include_dir_named packages
 ```
 
-Then copy (or symlink) the `packages/` folder from this directory into your HA config directory:
-
-```bash
-cp -r packages/ /path/to/your/ha/config/packages/
+Then place the file:
+```
+/config/packages/unifi_ports.yaml
 ```
 
-### 3. Restart Home Assistant
+### 5. Restart Home Assistant
 
-Settings → System → Restart.
+Settings → System → Restart (full restart, not just reload).
 
-### 4. Add the dashboard card
+### 6. Add the dashboard card
 
-In a dashboard: **Edit → Add Card → Manual** and paste the contents of
-`lovelace/unifi_ports_card.yaml`.
+Dashboard → Edit → Add Card → **Manual** → paste `lovelace/unifi_ports_card.yaml`.
 
-### 5. Rename ports to match your cabling
+### 7. Rename ports to match your cabling
 
-Settings → Entities → search "UniFi Port" → click a port → set a friendly name
-(e.g. "Server Room", "CCTV Cam 1", "Guest WiFi AP"). The name appears on the card.
+Settings → Entities → search "UniFi Port" → click any entry → set a friendly name
+(e.g. "Server Room NAS", "CCTV Cam 2"). The name shows up on the card automatically.
 
-## Start as a background service (macOS)
+---
+
+## Option B — macOS (standalone, no HAOS add-on)
+
+Use this if HA runs elsewhere and you want `port-api.js` running on the Mac.
+
+### Start as a background service
 
 ```bash
 # 1. Edit the plist — replace YOUR_HOME_PATH with your actual home directory
-#    e.g.  /Users/dbarajas
 nano homeassistant/launchd/com.unifi.port-api.plist
 
 # 2. Install
 cp homeassistant/launchd/com.unifi.port-api.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.unifi.port-api.plist
 
-# 3. Verify it started
+# 3. Verify
 launchctl list | grep unifi
 tail -20 /tmp/unifi-port-api.log
 ```
 
-To stop the service:
-```bash
-launchctl unload ~/Library/LaunchAgents/com.unifi.port-api.plist
-```
+### Point HA at the Mac
 
-## Automation example
+Replace `localhost` in `packages/unifi_ports.yaml` with the Mac's IP or Tailscale
+address (e.g. `http://192.168.1.50:8765/ports`).
 
-Trigger on any port losing link (e.g. alert if an uplink goes down):
+---
+
+## Automation examples
+
+Alert when an uplink loses link:
 
 ```yaml
 automation:
-  - alias: "Alert: uplink port went down"
+  - alias: "Alert: switch uplink down"
     trigger:
       - platform: state
         entity_id: sensor.unifi_port_9_link
@@ -100,42 +143,44 @@ automation:
       - service: notify.mobile_app_your_phone
         data:
           title: "Network Alert"
-          message: "SFP port 9 link is down"
+          message: "Switch SFP uplink (port 9) is down"
 ```
 
-Trigger on a port being disabled:
+Log every port disable event:
 
 ```yaml
 automation:
-  - alias: "Log port disable events"
+  - alias: "Log port disable"
     trigger:
       - platform: state
         entity_id:
           - switch.unifi_port_1
           - switch.unifi_port_2
           - switch.unifi_port_3
+          - switch.unifi_port_4
         to: "off"
     action:
       - service: logbook.log
         data:
           name: "UniFi"
-          message: "{{ trigger.to_state.name }} was disabled"
+          message: "{{ trigger.to_state.attributes.friendly_name }} was disabled"
 ```
+
+---
 
 ## Troubleshooting
 
 **Entities show as unavailable:**
-- Check `tail -20 /tmp/unifi-port-api.log` — the server may have crashed.
-- Verify the API token in `secrets.yaml` matches `port-config.json`.
-- Try `curl -s http://localhost:8765/health` from the machine running HA.
+- Add-on: check the add-on **Log** tab in HA for errors.
+- Mac: `curl -s http://localhost:8765/health` from the HA host.
+- Confirm `unifi_api_token` in `secrets.yaml` matches the add-on config.
 
-**Toggle has no effect / takes > 60s to reflect:**
-- The REST sensor polls every 60 seconds. State changes via the toggle are applied
-  immediately to the controller but the sensor won't reflect the new state until
-  the next poll cycle.
-- Reduce `scan_interval` in `packages/unifi_ports.yaml` for faster feedback (minimum ~10s).
+**Toggle has no effect / state takes >60 s to update:**
+- Actions apply immediately to the controller. The REST sensor polls every 60 s,
+  so the HA state catches up on the next cycle.
+- Reduce `scan_interval` in `packages/unifi_ports.yaml` for faster feedback.
 
-**HA is on a different machine than port-api.js:**
-- Use Tailscale: start the server with `LISTEN_ADDR=0.0.0.0 node port-api.js` and
-  replace `localhost` in `unifi_ports.yaml` with the Tailscale IP of the Mac.
-- Or SSH tunnel: `ssh -L 8765:localhost:8765 user@mac-hostname` and keep it open.
+**Add-on not visible in store after adding repo:**
+- Hard-refresh the browser.
+- Check HA → Settings → System → Logs for repository errors.
+- Confirm the repo URL is exactly `https://github.com/dbarajas1/unifi-port-manager`.
