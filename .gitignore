@@ -1,0 +1,4 @@
+node_modules/
+package-lock.json
+diag-output/
+unifi_port*_state.json

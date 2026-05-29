@@ -1,95 +1,125 @@
 # UniFi Port Manager
 
-PowerShell script to disable and re-enable ports on a UniFi USW Pro XG 8 PoE switch managed by a UCG Fiber controller — while preserving all port configuration intact.
+PowerShell script to disable and re-enable ports on a UniFi managed switch via the local UCG Fiber controller API — while preserving all port configuration intact.
 
-## Overview
+## Compatibility
 
-`Manage-UniFiPort.ps1` uses the local UniFi Network API to administratively shut down a switch port (no link, no PoE) and bring it back up with every setting fully restored: port profile, VLAN, PoE mode, speed, STP, and any other overrides.
+Tested and confirmed working on:
 
-A JSON snapshot file (`unifi_portN_state.json`) is written before each disable operation and consumed on re-enable, guaranteeing exact config restoration even across reboots or days between operations.
-
-## Environment
-
-| Component | Detail |
+| Component | Version |
 |---|---|
-| Controller | UCG Fiber (`SJ-FW-01`) at `192.168.1.1` |
-| Firmware | 5.1.12 (UniFi OS) |
-| Switch | USW Pro XG 8 PoE |
-| Ports | 1–8 copper 10G, 9–10 SFP28 uplinks |
+| Controller hardware | UCG Fiber |
+| UniFi OS firmware | 5.1.12 |
+| UniFi Network application | bundled with OS 5.1.12 |
+| Switch | USW Enterprise (USWED series) |
+| PowerShell | 5.1 (Windows) and 7+ (Windows/macOS/Linux) |
 
-## Requirements
+The API layout used (`/api/auth/login`, `/proxy/network/api/s/{site}/...`) is the **UniFi OS** layout present on all UCG-series and UDM-series controllers. It will not work against a standalone UniFi Network Server (self-hosted) without adjusting the base paths.
 
-- Windows PowerShell 5.1 **or** PowerShell 7+
-- Network access to `192.168.1.1`
-- A local UniFi admin account on the UCG Fiber
+## How It Works
+
+### Authentication
+
+The script authenticates against the local controller REST API — not Ubiquiti's cloud. No internet access is required.
+
+1. `POST /api/auth/login` with `{username, password}` encoded as UTF-8 JSON bytes.
+2. The controller returns a `TOKEN` cookie containing a signed JWT.
+3. The CSRF token is extracted by base64-decoding the JWT payload and reading the `csrfToken` field.
+4. Every subsequent API call carries the session cookie and `X-CSRF-Token` header.
+5. `POST /api/auth/logout` closes the session when done.
+
+The controller's self-signed TLS certificate is bypassed automatically (PS5 via a global policy override; PS7 via `-SkipCertificateCheck`).
+
+### Disable flow
+
+The UniFi API stores per-port customisations in a `port_overrides` array on each device object. The correct way to administratively disable a port is to set `"forward": "disabled"` in that port's override entry — **not** a boolean `disabled` field. The controller silently ignores unrecognised fields and will reject `forward: "disabled"` if conflicting fields are present, specifically:
+
+- `native_networkconf_id` must be cleared to `""` (no VLAN assignment)
+- `port_security_mac_address` must be cleared to `[]`
+- `stp_edge_state` must be set to `"auto"`
+- `stp_bpdu_guard_enabled` must be `false`
+
+These constraints were discovered empirically by probing the live API — the controller returns `rc: ok` silently without applying the change when they are not met.
+
+**Step by step:**
+
+1. `GET /proxy/network/api/s/{site}/stat/device` — fetch all adopted devices, locate the target switch by name or MAC.
+2. Read the current `port_overrides` entry for the target port and write it verbatim to `unifi_portN_state.json` (the snapshot).
+3. Build a modified copy of the override with `forward: disabled` and the conflicting fields cleared.
+4. `PUT /proxy/network/api/s/{site}/rest/device/{id}` — send the full `port_overrides` array with the modified entry.
+5. Re-fetch the device and verify `forward == "disabled"` actually landed before reporting success.
+
+### Enable flow
+
+1. Read `unifi_portN_state.json`.
+2. Restore the `original_override` from the snapshot exactly as it was — all fields, exact values including the original VLAN ID, port security MAC allowlist, STP settings, PoE mode, and port name.
+3. `PUT` the restored array back to the controller.
+4. On success, delete the snapshot file.
+
+If the snapshot file is missing, the script falls back to setting `forward: "native"` on the current override while preserving all other fields.
+
+### Snapshot file
+
+```
+unifi_port2_state.json   ← created on Disable, deleted on Enable
+unifi_port5_state.json
+```
+
+Each file is self-contained: it records the controller URL, site, device MAC, port index, and the complete original `port_override` entry. Enable can be run from any machine that has the file.
+
+> **Note:** Snapshot files contain network configuration details (VLAN IDs, internal device IDs). They are excluded from version control via `.gitignore` and should be treated as infrastructure config — keep them with your other network documentation, not in a public repo.
+
+### Verification
+
+After every Disable, the script re-fetches the device and checks that `forward == "disabled"` is present in the stored `port_overrides`. If the API accepted the request but the field did not land, the script removes the stale snapshot and exits with an error rather than reporting a false positive.
 
 ## Usage
 
 ```powershell
-# Disable port 3 (prompts for password)
-.\Manage-UniFiPort.ps1 -Action Disable -PortNumber 3
+# List all adopted switches (find the right -DeviceName or -DeviceMac)
+.\Manage-UniFiPort.ps1 -ListDevices
 
-# Re-enable port 3 — restores exact original config
-.\Manage-UniFiPort.ps1 -Action Enable -PortNumber 3
+# Disable port 3 on a named switch
+.\Manage-UniFiPort.ps1 -Action Disable -PortNumber 3 -DeviceName "your-switch-name"
 
-# Check current live state of port 5
-.\Manage-UniFiPort.ps1 -Action Status -PortNumber 5
+# Re-enable port 3 — restores exact original config from snapshot
+.\Manage-UniFiPort.ps1 -Action Enable -PortNumber 3 -DeviceName "your-switch-name"
 
-# Supply password inline (useful in automation / Task Scheduler)
-.\Manage-UniFiPort.ps1 -Action Disable -PortNumber 5 -Password "S3cur3!"
+# Check current live state of port 3
+.\Manage-UniFiPort.ps1 -Action Status -PortNumber 3 -DeviceName "your-switch-name"
 
-# Target a specific switch when multiple USW devices are adopted
-.\Manage-UniFiPort.ps1 -Action Disable -PortNumber 5 -DeviceMac "aa:bb:cc:11:22:33"
+# Target by MAC address instead of name
+.\Manage-UniFiPort.ps1 -Action Disable -PortNumber 3 -DeviceMac "aa:bb:cc:dd:ee:ff"
 
 # Dry-run — authenticates and shows what would change, applies nothing
-.\Manage-UniFiPort.ps1 -Action Disable -PortNumber 3 -WhatIf
+.\Manage-UniFiPort.ps1 -Action Disable -PortNumber 3 -DeviceName "your-switch-name" -WhatIf
+
+# Pass credentials inline (for Task Scheduler / automation)
+.\Manage-UniFiPort.ps1 -Action Disable -PortNumber 3 -DeviceName "your-switch-name" `
+    -Username "svc_account" -Password "password"
 ```
 
 ## Parameters
 
 | Parameter | Required | Default | Description |
 |---|---|---|---|
-| `-Action` | Yes | — | `Disable`, `Enable`, or `Status` |
-| `-PortNumber` | Yes | — | Port index 1–16 |
-| `-Username` | No | `admin` | UniFi admin username |
+| `-Action` | Yes* | — | `Disable`, `Enable`, or `Status` |
+| `-PortNumber` | Yes* | — | Port index 1–16 |
+| `-ListDevices` | — | — | Print all adopted switches and exit |
+| `-DeviceName` | Yes† | — | Switch name as shown in the UniFi UI |
+| `-DeviceMac` | Yes† | — | Switch MAC address (alternative to `-DeviceName`) |
+| `-Username` | No | *(prompted)* | Controller admin username |
 | `-Password` | No | *(prompted)* | Admin password |
 | `-ControllerUrl` | No | `https://192.168.1.1` | Base URL of the UCG Fiber |
 | `-Site` | No | `default` | UniFi site name |
-| `-DeviceMac` | No | *(auto-detect)* | MAC of the target switch |
 | `-StateDir` | No | *(script folder)* | Directory for snapshot files |
 
-## How It Works
-
-### Authentication
-The script posts credentials to `/api/auth/login` on the UCG Fiber (UniFi OS layout). The response sets a `TOKEN` cookie containing a JWT; the CSRF token is decoded from the JWT payload and attached as `X-CSRF-Token` on every subsequent call. The UCG Fiber's self-signed TLS certificate is bypassed automatically.
-
-### Disable flow
-1. Reads the current `port_overrides` entry for the target port from the controller.
-2. Writes a snapshot of the original entry to `unifi_portN_state.json`.
-3. Sets `disabled: true` on that entry (all other fields untouched) and `PUT`s the update to `/proxy/network/api/s/default/rest/device/<id>`.
-
-The switch immediately brings the port down — no link, no PoE. The controller retains the full configuration.
-
-### Enable flow
-1. Reads `unifi_portN_state.json`.
-2. If the port had an override before: restores that exact override (removing `disabled`).
-3. If the port had no override before: removes the override entry entirely, returning the port to its default profile.
-4. `PUT`s the restored state and deletes the snapshot file.
-
-If the snapshot file is missing (e.g. lost between runs), the script falls back to simply removing the `disabled` flag from the current override, preserving whatever other settings are present.
-
-### State file
-```
-unifi_port3_state.json   ← created on Disable, deleted on Enable
-unifi_port5_state.json
-...
-```
-
-Each file is self-contained — it records the controller URL, site, device MAC, and full original override so the Enable action can be run from any machine with the file present.
+\* Required when not using `-ListDevices`  
+† One of `-DeviceName` or `-DeviceMac` is required for all actions
 
 ## Security Notes
 
-- Credentials are never written to disk by this script.
-- The `-Password` parameter is available for automation; prefer `-AsSecureString` prompts for interactive use.
-- The snapshot files contain only port configuration metadata — no credentials.
-- TLS validation is bypassed for the local self-signed certificate only; this is standard practice for local UniFi controllers.
+- Credentials are never written to disk. The `-Password` parameter accepts plaintext for automation use; for interactive use the script prompts via `Get-Credential` (masked input).
+- The controller's self-signed TLS certificate is bypassed — this is expected for local UniFi installations. Do not use this script against a controller exposed to the public internet without proper certificate handling.
+- Snapshot files (`unifi_portN_state.json`) contain VLAN IDs, internal network object IDs, and port security MAC allowlists. They are excluded from git via `.gitignore`.
+- The script uses a session cookie + CSRF token pattern — no API key or long-lived token is stored anywhere.

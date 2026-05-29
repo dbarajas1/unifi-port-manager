@@ -10,7 +10,7 @@
     API (UniFi OS endpoint layout: /proxy/network/api/s/{site}/...).
 
     Disable:  snapshots the current port_override entry to a JSON sidecar file, then
-              sets disabled=true on the port.  The switch brings the port down (no
+              sets forward=disabled on the port.  The switch brings the port down (no
               link, no PoE) while the controller retains every config detail.
 
     Enable:   reads the sidecar, restores the original override exactly (or removes
@@ -340,8 +340,8 @@ if ($Action -eq 'Disable') {
 
     # Idempotency check
     if ($portOverride -and
-        $portOverride.PSObject.Properties['disabled'] -and
-        $portOverride.disabled -eq $true) {
+        $portOverride.PSObject.Properties['forward'] -and
+        $portOverride.forward -eq 'disabled') {
         Write-Host "[!] Port $PortNumber is already disabled.  Nothing to do."
         try { Invoke-UniFiApi -Uri "$ControllerUrl/api/auth/logout" -Method 'POST' `
                                -CsrfToken $csrf -WebSession $webSession | Out-Null } catch {}
