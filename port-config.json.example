@@ -1,0 +1,8 @@
+{
+  "controllerUrl": "https://192.168.1.1",
+  "site": "default",
+  "username": "svc_automation",
+  "deviceName": "your-switch-name",
+  "apiPort": 8765,
+  "apiToken": "REPLACE_WITH_A_LONG_RANDOM_SECRET"
+}

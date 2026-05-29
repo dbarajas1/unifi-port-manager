@@ -16,6 +16,25 @@ Tested and confirmed working on:
 
 The API layout used (`/api/auth/login`, `/proxy/network/api/s/{site}/...`) is the **UniFi OS** layout present on all UCG-series and UDM-series controllers. It will not work against a standalone UniFi Network Server (self-hosted) without adjusting the base paths.
 
+## Quick Start
+
+Run the setup wizard once. It writes `port-config.json` with your controller settings and saves the password to the macOS Keychain (or an encrypted file on Windows) so you never need to type credentials again.
+
+```powershell
+# 1. Find your switch name
+.\Manage-UniFiPort.ps1 -ListDevices
+
+# 2. Configure (one time)
+.\Setup-Config.ps1
+
+# 3. Done — use the wrapper from now on
+.\Set-SwitchPort.ps1 -Action Disable -PortNumber 3
+.\Set-SwitchPort.ps1 -Action Enable  -PortNumber 3
+.\Set-SwitchPort.ps1 -Action Status  -PortNumber 3
+```
+
+`Setup-Config.ps1` stores the password in the macOS login Keychain (PS7) or as a DPAPI-encrypted `.unifi_pass` file (Windows).  On other platforms, set `UNIFI_PASSWORD` in the environment.
+
 ## How It Works
 
 ### Authentication
@@ -116,6 +135,66 @@ After every Disable, the script re-fetches the device and checks that `forward =
 
 \* Required when not using `-ListDevices`  
 † One of `-DeviceName` or `-DeviceMac` is required for all actions
+
+## Remote Access
+
+Three options when you need to disable/enable a port without being physically at the machine running this script.
+
+### Option 1 — SSH (simplest)
+
+```bash
+# From any machine that can SSH to the Mac/PC running this repo:
+ssh user@your-mac 'pwsh -File /path/to/Set-SwitchPort.ps1 -Action Disable -PortNumber 3'
+```
+
+No extra software beyond SSH and PowerShell. Use SSH key auth and a dedicated limited user for automation.
+
+### Option 2 — Tailscale (easiest for mobile)
+
+Install [Tailscale](https://tailscale.com) on the Mac and on your phone/laptop. The Mac gets a stable Tailscale IP reachable from anywhere on your tailnet. Then either SSH as above, or start `port-api.js` bound on all interfaces:
+
+```bash
+LISTEN_ADDR=0.0.0.0 node port-api.js
+```
+
+Tailscale's ACL controls who can reach the port — no firewall rules needed.
+
+### Option 3 — port-api.js (HTTP API)
+
+A lightweight Node.js HTTP server that exposes a token-authenticated REST API. No extra npm packages required.
+
+```bash
+# Start the server (password from Keychain or env var)
+node port-api.js
+
+# Or override the listen address for Tailscale access
+LISTEN_ADDR=0.0.0.0 node port-api.js
+```
+
+**Endpoints** (all except `/health` require `X-API-Token` header):
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Liveness check (no auth) |
+| `GET` | `/ports/:n` | Port status |
+| `POST` | `/ports/:n/disable` | Disable port |
+| `POST` | `/ports/:n/enable` | Enable port (restores snapshot) |
+
+**SSH tunnel example** — expose the API to a remote machine without opening any firewall ports:
+
+```bash
+# On the remote machine — forwards local 8765 to the Mac over SSH
+ssh -L 8765:localhost:8765 user@your-mac
+
+# In another terminal on the remote machine
+curl -s -H "X-API-Token: <token>" http://localhost:8765/ports/3
+curl -s -H "X-API-Token: <token>" -X POST http://localhost:8765/ports/3/disable
+curl -s -H "X-API-Token: <token>" -X POST http://localhost:8765/ports/3/enable
+```
+
+The API token is printed by `Setup-Config.ps1` and stored in `port-config.json`.
+
+> **Note:** `port-config.json` is excluded from version control. It contains the API token and controller URL; keep it alongside your other network credentials.
 
 ## Security Notes
 
