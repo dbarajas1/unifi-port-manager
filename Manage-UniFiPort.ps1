@@ -162,13 +162,20 @@ if (-not $Password) {
 # 2. Login — obtain session cookie + CSRF token
 # ══════════════════════════════════════════════════════════════════════════════
 Write-Host "[*] Authenticating to $ControllerUrl as '$Username' ..."
+Write-Verbose "Credential check — username length: $($Username.Length)  password length: $($Password.Length)"
+
+# Encode body as explicit UTF-8 bytes so Invoke-WebRequest cannot append
+# "; charset=utf-16" to the Content-Type, which causes the UniFi API to
+# misparse the JSON and reject otherwise-valid credentials.
+$loginJson  = [ordered]@{ username = $Username; password = $Password } | ConvertTo-Json -Compress
+$loginBytes = [System.Text.Encoding]::UTF8.GetBytes($loginJson)
 
 $loginArgs = @{
     Uri             = "$ControllerUrl/api/auth/login"
     Method          = 'POST'
-    Body            = (@{ username = $Username; password = $Password; token = ''; rememberMe = $false } |
-                        ConvertTo-Json -Compress)
+    Body            = $loginBytes
     ContentType     = 'application/json'
+    Headers         = @{ Accept = 'application/json' }
     SessionVariable = 'webSession'
     UseBasicParsing = $true
 }
@@ -177,7 +184,10 @@ if ($PSVersionTable.PSVersion.Major -ge 6) { $loginArgs['SkipCertificateCheck'] 
 try {
     Invoke-WebRequest @loginArgs | Out-Null
 } catch {
-    Write-Error "Login failed. Verify credentials and that $ControllerUrl is reachable.`nDetail: $_"
+    # Surface the raw API response body when available for easier diagnosis
+    $detail = $_.ErrorDetails.Message
+    if (-not $detail) { $detail = $_.Exception.Message }
+    Write-Error "Login failed. Verify credentials and that $ControllerUrl is reachable.`nDetail: $detail"
     exit 1
 }
 
