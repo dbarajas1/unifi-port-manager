@@ -362,13 +362,16 @@ if ($Action -eq 'Disable') {
     $snapshot | ConvertTo-Json -Depth 10 | Set-Content $stateFile -Encoding UTF8
     Write-Host "[*] Config snapshot saved → $stateFile"
 
-    # Build the updated override: copy all existing fields then set disabled=true
+    # Disable by setting forward="disabled" — the correct field for this firmware.
+    # The boolean "disabled" key is unrecognized and gets silently stripped by the
+    # controller, causing a false-positive success. Ports 5-8/10 on this device
+    # confirm "forward":"disabled" is how the UI itself represents a shut port.
     if ($portOverride) {
         $newOverride = ConvertTo-Hashtable $portOverride
     } else {
         $newOverride = [ordered]@{ port_idx = $PortNumber }
     }
-    $newOverride['disabled'] = $true
+    $newOverride['forward'] = 'disabled'
 
     # Rebuild the full array (keep all other ports untouched)
     $otherOverrides = [array]@($currentOverrides | Where-Object { $_.port_idx -ne $PortNumber })
@@ -402,22 +405,13 @@ if ($Action -eq 'Disable') {
         $verifyPort = @(if ($verifyDev.port_overrides) { $verifyDev.port_overrides } else { @() }) |
                       Where-Object { $_.port_idx -eq $PortNumber } | Select-Object -First 1
 
-        if ($verifyPort -and $verifyPort.PSObject.Properties['disabled'] -and $verifyPort.disabled -eq $true) {
+        if ($verifyPort -and $verifyPort.PSObject.Properties['forward'] -and $verifyPort.forward -eq 'disabled') {
             Write-Host "[+] VERIFIED: Port $PortNumber is disabled on $($switch.name)."
             Write-Host "    Run with -Action Enable -PortNumber $PortNumber to restore."
         } else {
-            Write-Warning "API accepted the request (rc=ok) but port $PortNumber does NOT show disabled=true after re-fetch."
-            Write-Host ""
-            Write-Host "  Actual port_override on controller after PUT:"
-            if ($verifyPort) { $verifyPort | Format-List } else { Write-Host "  (no override entry for port $PortNumber)" }
-            Write-Host ""
-            Write-Host "  Possible causes:"
-            Write-Host "  1. Account '$Username' may lack write permission on device config."
-            Write-Host "  2. The 'disabled' field may not be supported for this device/firmware."
-            Write-Host "  3. The controller accepted the PUT but silently dropped the 'disabled' key."
-            Write-Host ""
+            Write-Warning "API accepted the request (rc=ok) but port $PortNumber does not show forward=disabled after re-fetch."
+            Write-Host "  Actual override: $(if ($verifyPort) { $verifyPort | ConvertTo-Json -Compress } else { '(none)' })"
             Write-Host "  Run with -Verbose to see the exact JSON sent and the full API response."
-            # Remove stale snapshot since the disable did not actually apply
             Remove-Item $stateFile -ErrorAction SilentlyContinue
             exit 1
         }
@@ -451,9 +445,9 @@ elseif ($Action -eq 'Enable') {
         }
 
     } else {
-        # ── No snapshot: best-effort enable by dropping the disabled flag ─────
+        # ── No snapshot: best-effort enable by resetting forward to "native" ───
         Write-Warning "Snapshot file not found at $stateFile."
-        Write-Host "    Best-effort enable: removing 'disabled' flag from current override."
+        Write-Host "    Best-effort enable: resetting forward to 'native' (default trunk/access)."
 
         if (-not $portOverride) {
             Write-Host "[!] Port $PortNumber has no override entry — it is not disabled.  Nothing to do."
@@ -462,8 +456,15 @@ elseif ($Action -eq 'Enable') {
             exit 0
         }
 
+        if ($portOverride.PSObject.Properties['forward'] -and $portOverride.forward -ne 'disabled') {
+            Write-Host "[!] Port $PortNumber forward=$($portOverride.forward) — does not appear disabled."
+            try { Invoke-UniFiApi -Uri "$ControllerUrl/api/auth/logout" -Method 'POST' `
+                                   -CsrfToken $csrf -WebSession $webSession | Out-Null } catch {}
+            exit 0
+        }
+
         $restored = ConvertTo-Hashtable $portOverride
-        $restored.Remove('disabled')
+        $restored['forward'] = 'native'
         $otherOverrides = [array]@($currentOverrides | Where-Object { $_.port_idx -ne $PortNumber })
         $newOverrides   = if ($otherOverrides) { $otherOverrides + $restored } else { @($restored) }
     }
