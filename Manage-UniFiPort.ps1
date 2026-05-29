@@ -362,16 +362,21 @@ if ($Action -eq 'Disable') {
     $snapshot | ConvertTo-Json -Depth 10 | Set-Content $stateFile -Encoding UTF8
     Write-Host "[*] Config snapshot saved → $stateFile"
 
-    # Disable by setting forward="disabled" — the correct field for this firmware.
-    # The boolean "disabled" key is unrecognized and gets silently stripped by the
-    # controller, causing a false-positive success. Ports 5-8/10 on this device
-    # confirm "forward":"disabled" is how the UI itself represents a shut port.
+    # The controller rejects forward="disabled" when native_networkconf_id has a
+    # VLAN ID or port_security_mac_address is non-empty. All working disabled
+    # ports on this device have these fields cleared. We preserve the originals
+    # in the snapshot so Enable can restore them exactly.
     if ($portOverride) {
         $newOverride = ConvertTo-Hashtable $portOverride
     } else {
         $newOverride = [ordered]@{ port_idx = $PortNumber }
     }
-    $newOverride['forward'] = 'disabled'
+    $newOverride['forward']                    = 'disabled'
+    $newOverride['setting_preference']         = 'auto'
+    $newOverride['native_networkconf_id']      = ''
+    $newOverride['port_security_mac_address']  = @()
+    $newOverride['stp_edge_state']             = 'auto'
+    $newOverride['stp_bpdu_guard_enabled']     = $false
 
     # Rebuild the full array (keep all other ports untouched)
     $otherOverrides = [array]@($currentOverrides | Where-Object { $_.port_idx -ne $PortNumber })
@@ -396,12 +401,12 @@ if ($Action -eq 'Disable') {
             exit 1
         }
 
-        # Verify the change actually landed — re-fetch and inspect port_overrides
+        # Verify the change actually landed — re-fetch all devices and filter by MAC
         Write-Host "[*] Verifying change on controller ..."
         Start-Sleep -Milliseconds 800
-        $verify     = Invoke-UniFiApi -Uri "$ControllerUrl/proxy/network/api/s/$Site/stat/device/$deviceId" `
-                                       -CsrfToken $csrf -WebSession $webSession
-        $verifyDev  = $verify.data | Select-Object -First 1
+        $verify    = Invoke-UniFiApi -Uri "$ControllerUrl/proxy/network/api/s/$Site/stat/device" `
+                                      -CsrfToken $csrf -WebSession $webSession
+        $verifyDev = $verify.data | Where-Object { $_.mac -eq $switch.mac } | Select-Object -First 1
         $verifyPort = @(if ($verifyDev.port_overrides) { $verifyDev.port_overrides } else { @() }) |
                       Where-Object { $_.port_idx -eq $PortNumber } | Select-Object -First 1
 
