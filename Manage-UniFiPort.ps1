@@ -65,21 +65,26 @@
     .\Manage-UniFiPort.ps1 -Action Disable -PortNumber 3 -WhatIf
 #>
 
-[CmdletBinding(SupportsShouldProcess)]
+[CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'Manage')]
 param (
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = 'Manage')]
     [ValidateSet('Disable', 'Enable', 'Status')]
     [string]$Action,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = 'Manage')]
     [ValidateRange(1, 16)]
     [int]$PortNumber,
+
+    # List all adopted switches then exit — use this to find the right -DeviceName or -DeviceMac
+    [Parameter(ParameterSetName = 'List')]
+    [switch]$ListDevices,
 
     [string]$Username,
     [string]$Password,
     [string]$ControllerUrl = 'https://192.168.1.1',
     [string]$Site          = 'default',
     [string]$DeviceMac,
+    [string]$DeviceName,
     [string]$StateDir      = $PSScriptRoot
 )
 
@@ -224,31 +229,61 @@ if (-not $allDevices -or $allDevices.Count -eq 0) {
     exit 1
 }
 
-# Narrow to switches
+# All adopted switches
 $switches = [array]@($allDevices | Where-Object { $_.type -eq 'usw' })
 
-# Apply optional MAC filter
-if ($DeviceMac) {
-    $normMac  = ($DeviceMac -replace '[:\-]', '').ToLower()
-    $switches = [array]@($switches | Where-Object { ($_.mac -replace ':', '').ToLower() -eq $normMac })
+# ── -ListDevices: print every switch and exit ──────────────────────────────────
+if ($ListDevices) {
+    if ($switches.Count -eq 0) {
+        Write-Host "No adopted switches found on site '$Site'."
+    } else {
+        Write-Host "`nAdopted switches on site '$Site':`n"
+        $switches | Sort-Object name | Format-Table @{L='Name';E={$_.name}},
+                                                     @{L='Model';E={$_.model}},
+                                                     @{L='MAC';E={$_.mac}},
+                                                     @{L='IP';E={$_.ip}} -AutoSize
+        Write-Host "Rerun with -DeviceName <name> or -DeviceMac <mac> to target a specific switch."
+    }
+    try { Invoke-UniFiApi -Uri "$ControllerUrl/api/auth/logout" -Method 'POST' `
+                           -CsrfToken $csrf -WebSession $webSession | Out-Null } catch {}
+    exit 0
 }
 
-# Prefer model-name match (USW-Pro-XG-8-PoE model codes seen in the wild)
-$switch = $switches | Where-Object { $_.model -match 'USWXG|XG8P|XG-8|Pro-XG' } | Select-Object -First 1
+# ── Resolve target switch ──────────────────────────────────────────────────────
+# Require -DeviceName or -DeviceMac; never guess when multiple switches exist.
+if (-not $DeviceMac -and -not $DeviceName) {
+    Write-Host "`nMultiple switches may be adopted. Use -ListDevices to see them, then rerun with"
+    Write-Host "-DeviceName <name>  OR  -DeviceMac <mac:address> to target the correct switch.`n"
+    if ($switches.Count -gt 0) {
+        $switches | Sort-Object name | Format-Table @{L='Name';E={$_.name}},
+                                                     @{L='Model';E={$_.model}},
+                                                     @{L='MAC';E={$_.mac}} -AutoSize
+    }
+    try { Invoke-UniFiApi -Uri "$ControllerUrl/api/auth/logout" -Method 'POST' `
+                           -CsrfToken $csrf -WebSession $webSession | Out-Null } catch {}
+    exit 1
+}
 
-# Fall back to any single remaining switch (useful in single-switch setups)
-if (-not $switch -and $switches.Count -eq 1) {
-    $switch = $switches[0]
+if ($DeviceMac) {
+    $normMac = ($DeviceMac -replace '[:\-]', '').ToLower()
+    $switch  = $switches | Where-Object { ($_.mac -replace ':', '').ToLower() -eq $normMac } |
+               Select-Object -First 1
+}
+
+if (-not $switch -and $DeviceName) {
+    $switch = $switches | Where-Object { $_.name -eq $DeviceName } | Select-Object -First 1
+    if (-not $switch) {
+        # Case-insensitive fallback
+        $switch = $switches | Where-Object { $_.name -like $DeviceName } | Select-Object -First 1
+    }
 }
 
 if (-not $switch) {
-    Write-Warning "Could not auto-detect USW Pro XG 8 PoE.  Adopted switches found:"
-    if ($switches.Count -gt 0) {
-        $switches | Sort-Object model | Format-Table mac, model, name -AutoSize
-        Write-Error "Rerun with -DeviceMac to target the correct device."
-    } else {
-        Write-Error "No adopted switches found on site '$Site'."
-    }
+    Write-Host "`nNo switch matched. Adopted switches on site '$Site':`n"
+    $switches | Sort-Object name | Format-Table @{L='Name';E={$_.name}},
+                                                 @{L='Model';E={$_.model}},
+                                                 @{L='MAC';E={$_.mac}} -AutoSize
+    Write-Error "Device not found. Check -DeviceName / -DeviceMac and rerun."
     exit 1
 }
 
