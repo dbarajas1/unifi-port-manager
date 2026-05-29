@@ -3,6 +3,7 @@
   "site": "default",
   "username": "svc_automation",
   "deviceName": "your-switch-name",
+  "ucgFiberName": "your-ucg-fiber-name",
   "apiPort": 8765,
   "apiToken": "REPLACE_WITH_A_LONG_RANDOM_SECRET"
 }

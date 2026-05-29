@@ -1,46 +1,91 @@
 # Paste this into a dashboard view as a manual YAML card.
 # In HA UI: Dashboard → Edit → Add Card → Manual.
 #
-# Shows every port as a toggle row with link state as secondary info.
-# Rename rows via HA's entity customization (Settings → Entities → find
-# "UniFi Port N" → set a friendly name like "Server Room" or "CCTV Cam 1").
+# Shows all 17 ports (10 switch + 7 UCG Fiber) as toggles.
+# Rename entities via Settings → Entities to match your cabling.
+#
+# Current known names (from live controller):
+#   Switch port 1  = Wireless
+#   Switch port 2  = David's Desktop
+#   Switch port 3  = Ruben's Desktop
+#   Switch port 9  = LAN (SFP+ uplink to UCG Fiber)
+#   UCG Fiber port 6 = To SJ-SW-01 (CRITICAL uplink — disable with caution)
 
 type: entities
-title: UniFi Switch Ports
+title: UniFi Ports
 show_header_toggle: false
 entities:
   - type: section
-    label: "Copper (10G)"
+    label: "SJ-UP-SW-01 — Copper (10GE, ports 1-8)"
   - entity: switch.unifi_port_1
+    name: "Port 1 — Wireless"
     secondary_info: last-changed
   - entity: switch.unifi_port_2
+    name: "Port 2 — David's Desktop"
     secondary_info: last-changed
   - entity: switch.unifi_port_3
+    name: "Port 3 — Ruben's Desktop"
     secondary_info: last-changed
   - entity: switch.unifi_port_4
+    name: "Port 4"
     secondary_info: last-changed
   - entity: switch.unifi_port_5
+    name: "Port 5"
     secondary_info: last-changed
   - entity: switch.unifi_port_6
+    name: "Port 6"
     secondary_info: last-changed
   - entity: switch.unifi_port_7
+    name: "Port 7"
     secondary_info: last-changed
   - entity: switch.unifi_port_8
+    name: "Port 8"
     secondary_info: last-changed
+
   - type: section
-    label: "SFP28 Uplinks"
-  - entity: switch.unifi_port_9_sfp
+    label: "SJ-UP-SW-01 — SFP+ (ports 9-10)"
+  - entity: switch.unifi_port_9_lan
+    name: "Port 9 — LAN uplink"
     secondary_info: last-changed
   - entity: switch.unifi_port_10_sfp
+    name: "Port 10 — SFP+ 2"
     secondary_info: last-changed
+
+  - type: section
+    label: "SJ-FW-01 UCG Fiber — 2.5GE (ports 1-4)"
+  - entity: switch.unifi_fw_port_1
+    name: "FW Port 1"
+    secondary_info: last-changed
+  - entity: switch.unifi_fw_port_2
+    name: "FW Port 2"
+    secondary_info: last-changed
+  - entity: switch.unifi_fw_port_3
+    name: "FW Port 3"
+    secondary_info: last-changed
+  - entity: switch.unifi_fw_port_4
+    name: "FW Port 4"
+    secondary_info: last-changed
+
+  - type: section
+    label: "SJ-FW-01 UCG Fiber — 10GE / SFP+ (ports 5-7)"
+  - entity: switch.unifi_fw_port_5_lan
+    name: "FW Port 5 — LAN"
+    secondary_info: last-changed
+  - entity: switch.unifi_fw_port_6_uplink
+    name: "FW Port 6 — To SJ-SW-01 ⚠️"
+    secondary_info: last-changed
+  - entity: switch.unifi_fw_port_7_sfp
+    name: "FW Port 7 — SFP+ 2"
+    secondary_info: last-changed
+
   - type: divider
   - type: attribute
     entity: sensor.unifi_switch_ports
-    attribute: device
-    name: Device
-    icon: mdi:switch
-  - type: attribute
-    entity: sensor.unifi_switch_ports
     attribute: timestamp
-    name: Last polled
+    name: Switch last polled
+    icon: mdi:clock-outline
+  - type: attribute
+    entity: sensor.unifi_ucg_ports
+    attribute: timestamp
+    name: UCG Fiber last polled
     icon: mdi:clock-outline

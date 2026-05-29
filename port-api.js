@@ -6,14 +6,15 @@
 //        (or store password in macOS Keychain via Setup-Config.ps1 — no env var needed)
 //
 // Endpoints (all except /health require X-API-Token header):
-//   GET  /health              — liveness check, no auth
-//   GET  /ports/:n            — port status
-//   POST /ports/:n/disable    — disable port
-//   POST /ports/:n/enable     — enable port (restores snapshot)
+//   GET  /health                       — liveness check, no auth
+//   GET  /ports[?device=<name>]        — all ports on default (or named) device
+//   GET  /ports/:n[?device=<name>]     — single port status
+//   POST /ports/:n/disable[?device=…]  — disable port
+//   POST /ports/:n/enable[?device=…]   — enable port (restores snapshot)
 //
 // Remote access via SSH tunnel:
 //   ssh -L 8765:localhost:8765 user@your-mac
-//   curl -s -H "X-API-Token: <token>" http://localhost:8765/ports/3
+//   curl -s -H "X-API-Token: <token>" http://localhost:8765/ports?device=SJ-FW-01
 
 'use strict';
 
@@ -31,7 +32,7 @@ if (!fs.existsSync(configPath)) {
 }
 
 const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-const { controllerUrl, site = 'default', username, deviceName, apiToken } = cfg;
+const { controllerUrl, site = 'default', username, deviceName, ucgFiberName, apiToken } = cfg;
 const listenPort    = parseInt(process.env.PORT || cfg.apiPort || 8765, 10);
 const listenAddress = process.env.LISTEN_ADDR || '127.0.0.1';
 
@@ -146,20 +147,31 @@ async function logout(csrf, token) {
 }
 
 // ── Port state file helpers ───────────────────────────────────────────────────
+// Default device uses the short form (backward-compatible with Manage-UniFiPort.ps1).
+// Non-default devices get a device-prefixed filename to avoid port-index collisions.
 const stateDir = __dirname;
-const stateFile = n => path.join(stateDir, `unifi_port${n}_state.json`);
+function stateFile(n, targetDevice) {
+  if (targetDevice === deviceName) {
+    return path.join(stateDir, `unifi_port${n}_state.json`);
+  }
+  const slug = targetDevice.replace(/[^a-zA-Z0-9]/g, '_');
+  return path.join(stateDir, `unifi_${slug}_port${n}_state.json`);
+}
 
 // ── Port operations ───────────────────────────────────────────────────────────
-async function portStatus(portNum) {
+// targetDevice defaults to the primary switch from port-config.json.
+// Pass a different name (e.g. ucgFiberName) to operate on the UCG Fiber.
+
+async function portStatus(portNum, targetDevice = deviceName) {
   const { token, csrf } = await login();
   try {
-    const devices = await getDevices(csrf, token);
-    const sw = devices.find(d => d.type === 'usw' && d.name === deviceName);
-    if (!sw) throw new Error(`Switch '${deviceName}' not found`);
+    const devices   = await getDevices(csrf, token);
+    const sw        = devices.find(d => d.name === targetDevice);
+    if (!sw) throw new Error(`Device '${targetDevice}' not found`);
 
     const override  = (sw.port_overrides || []).find(o => o.port_idx === portNum) || null;
     const portEntry = (sw.port_table     || []).find(p => p.port_idx === portNum) || null;
-    const sf        = stateFile(portNum);
+    const sf        = stateFile(portNum, targetDevice);
     const snapshot  = fs.existsSync(sf) ? JSON.parse(fs.readFileSync(sf, 'utf8')) : null;
 
     return {
@@ -178,12 +190,12 @@ async function portStatus(portNum) {
   }
 }
 
-async function disablePort(portNum) {
+async function disablePort(portNum, targetDevice = deviceName) {
   const { token, csrf } = await login();
   try {
-    const devices  = await getDevices(csrf, token);
-    const sw       = devices.find(d => d.type === 'usw' && d.name === deviceName);
-    if (!sw) throw new Error(`Switch '${deviceName}' not found`);
+    const devices   = await getDevices(csrf, token);
+    const sw        = devices.find(d => d.name === targetDevice);
+    if (!sw) throw new Error(`Device '${targetDevice}' not found`);
 
     const overrides = (sw.port_overrides || []).map(o => ({ ...o }));
     const existing  = overrides.find(o => o.port_idx === portNum) || null;
@@ -193,7 +205,7 @@ async function disablePort(portNum) {
     }
 
     // Save snapshot before making any change
-    fs.writeFileSync(stateFile(portNum), JSON.stringify({
+    fs.writeFileSync(stateFile(portNum, targetDevice), JSON.stringify({
       captured_at:       new Date().toISOString(),
       controller_url:    controllerUrl,
       site,
@@ -222,7 +234,7 @@ async function disablePort(portNum) {
     const verifyDev = verify.find(d => d.mac === sw.mac);
     const verifyOv  = (verifyDev?.port_overrides || []).find(o => o.port_idx === portNum);
     if (!verifyOv || verifyOv.forward !== 'disabled') {
-      fs.unlinkSync(stateFile(portNum));
+      fs.unlinkSync(stateFile(portNum, targetDevice));
       throw new Error('Port disable did not stick after re-fetch verification');
     }
 
@@ -232,15 +244,15 @@ async function disablePort(portNum) {
   }
 }
 
-async function enablePort(portNum) {
+async function enablePort(portNum, targetDevice = deviceName) {
   const { token, csrf } = await login();
   try {
     const devices = await getDevices(csrf, token);
-    const sw      = devices.find(d => d.type === 'usw' && d.name === deviceName);
-    if (!sw) throw new Error(`Switch '${deviceName}' not found`);
+    const sw      = devices.find(d => d.name === targetDevice);
+    if (!sw) throw new Error(`Device '${targetDevice}' not found`);
 
     const overrides = (sw.port_overrides || []).map(o => ({ ...o }));
-    const sf        = stateFile(portNum);
+    const sf        = stateFile(portNum, targetDevice);
     let   newOverrides;
 
     if (fs.existsSync(sf)) {
@@ -268,13 +280,12 @@ async function enablePort(portNum) {
   }
 }
 
-// ── Bulk status (all ports on the switch) ─────────────────────────────────────
-async function allPortsStatus() {
+async function allPortsStatus(targetDevice = deviceName) {
   const { token, csrf } = await login();
   try {
     const devices = await getDevices(csrf, token);
-    const sw      = devices.find(d => d.type === 'usw' && d.name === deviceName);
-    if (!sw) throw new Error(`Switch '${deviceName}' not found`);
+    const sw      = devices.find(d => d.name === targetDevice);
+    if (!sw) throw new Error(`Device '${targetDevice}' not found`);
 
     const overrides = sw.port_overrides || [];
     const portTable = (sw.port_table || []).sort((a, b) => a.port_idx - b.port_idx);
@@ -282,7 +293,7 @@ async function allPortsStatus() {
     const ports = portTable.map(pt => {
       const n        = pt.port_idx;
       const override = overrides.find(o => o.port_idx === n) || null;
-      const sf       = stateFile(n);
+      const sf       = stateFile(n, targetDevice);
       const snapshot = fs.existsSync(sf) ? JSON.parse(fs.readFileSync(sf, 'utf8')) : null;
       return {
         port:               n,
@@ -291,6 +302,7 @@ async function allPortsStatus() {
         link:               pt.up ? 'up' : 'down',
         speed:              pt.speed || 0,
         poe_mode:           pt.poe_mode || null,
+        media:              pt.media || null,
         snapshotPresent:    !!snapshot,
         snapshotCapturedAt: snapshot ? snapshot.captured_at : null,
       };
@@ -299,6 +311,7 @@ async function allPortsStatus() {
     return {
       device:    sw.name,
       model:     sw.model,
+      type:      sw.type,
       mac:       sw.mac,
       ip:        sw.ip,
       ports,
@@ -320,16 +333,23 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   if (req.method === 'GET' && url.pathname === '/health') {
-    return send(res, 200, { ok: true, device: deviceName, controller: controllerUrl });
+    return send(res, 200, {
+      ok: true,
+      devices: { switch: deviceName, ucgFiber: ucgFiberName || null },
+      controller: controllerUrl,
+    });
   }
 
   if (req.headers['x-api-token'] !== apiToken) {
     return send(res, 401, { error: 'Unauthorized — supply X-API-Token header' });
   }
 
+  // ?device= query param selects the target device; defaults to primary switch
+  const targetDevice = url.searchParams.get('device') || deviceName;
+
   // Bulk: all ports in one call
   if (req.method === 'GET' && url.pathname === '/ports') {
-    try { return send(res, 200, await allPortsStatus()); }
+    try { return send(res, 200, await allPortsStatus(targetDevice)); }
     catch (err) {
       console.error('[ERROR] GET /ports —', err.message);
       return send(res, 500, { error: err.message });
@@ -342,10 +362,10 @@ const server = http.createServer(async (req, res) => {
       error: 'Not found',
       routes: [
         'GET  /health',
-        'GET  /ports              — all ports',
-        'GET  /ports/:n           — single port',
-        'POST /ports/:n/disable',
-        'POST /ports/:n/enable',
+        'GET  /ports[?device=<name>]              — all ports',
+        'GET  /ports/:n[?device=<name>]           — single port',
+        'POST /ports/:n/disable[?device=<name>]',
+        'POST /ports/:n/enable[?device=<name>]',
       ],
     });
   }
@@ -355,13 +375,13 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (req.method === 'GET' && !m[2]) {
-      return send(res, 200, await portStatus(portNum));
+      return send(res, 200, await portStatus(portNum, targetDevice));
     }
     if (req.method === 'POST' && m[2] === 'disable') {
-      return send(res, 200, await disablePort(portNum));
+      return send(res, 200, await disablePort(portNum, targetDevice));
     }
     if (req.method === 'POST' && m[2] === 'enable') {
-      return send(res, 200, await enablePort(portNum));
+      return send(res, 200, await enablePort(portNum, targetDevice));
     }
     return send(res, 405, { error: 'Method not allowed' });
   } catch (err) {
@@ -372,18 +392,21 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(listenPort, listenAddress, () => {
   console.log(`UniFi Port API  →  http://${listenAddress}:${listenPort}`);
-  console.log(`Device: ${deviceName}   Controller: ${controllerUrl}`);
+  console.log(`Primary switch : ${deviceName}`);
+  if (ucgFiberName) console.log(`UCG Fiber      : ${ucgFiberName}`);
+  console.log(`Controller     : ${controllerUrl}`);
   console.log('');
   console.log('Endpoints (X-API-Token header required except /health):');
-  console.log(`  GET  http://${listenAddress}:${listenPort}/health`);
-  console.log(`  GET  http://${listenAddress}:${listenPort}/ports           ← all ports`);
-  console.log(`  GET  http://${listenAddress}:${listenPort}/ports/:n`);
-  console.log(`  POST http://${listenAddress}:${listenPort}/ports/:n/disable`);
-  console.log(`  POST http://${listenAddress}:${listenPort}/ports/:n/enable`);
+  console.log(`  GET  /health`);
+  console.log(`  GET  /ports                         ← switch ports`);
+  console.log(`  GET  /ports?device=${ucgFiberName || 'SJ-FW-01'}   ← UCG Fiber ports`);
+  console.log(`  GET  /ports/:n`);
+  console.log(`  POST /ports/:n/disable`);
+  console.log(`  POST /ports/:n/enable`);
   console.log('');
-  console.log('Remote access via SSH tunnel (run on the remote machine):');
+  console.log('Remote access via SSH tunnel:');
   console.log(`  ssh -L ${listenPort}:localhost:${listenPort} user@$(hostname -s)`);
-  console.log(`  curl -s -H "X-API-Token: <token>" http://localhost:${listenPort}/ports/3`);
+  console.log(`  curl -s -H "X-API-Token: <token>" http://localhost:${listenPort}/ports`);
   console.log('');
   console.log('Or use Tailscale (set LISTEN_ADDR=0.0.0.0 to bind on all interfaces).');
 });
